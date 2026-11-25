@@ -220,17 +220,15 @@ if __name__ == "__main__":
     agent = NewsomeSp500Agent(SP500_TICKERS)
     market_status, results = agent.scan_market()
 
-   if results:
+    if results:
         alert_lines = [
             "📈 *Newsome S&P 500 Swing Setups* 📈",
             market_status,
             "",
         ]
         for stock, details in results.items():
-            print(f"\n★ Setup Found for {stock} ★")
             alert_lines.append(f"*{stock}* — Bullish Reversal (Weekly+Daily)")
             for k, v in details.items():
-                print(f"  {k}: {v}")
                 if k != "Signal":
                     alert_lines.append(f"  • {k}: `${v}`")
             alert_lines.append("")
