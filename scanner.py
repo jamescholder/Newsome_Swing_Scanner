@@ -238,5 +238,4 @@ if __name__ == "__main__":
         send_telegram_alert("\n".join(alert_lines))
     else:
         msg = "No S&P 500 stocks matched the Weekly 50 SMA + pullback + volume criteria today."
-        print(f"\n{msg}")
         send_telegram_alert(f"📊 *Newsome Scanner*\n{market_status}\n\n{msg}")
