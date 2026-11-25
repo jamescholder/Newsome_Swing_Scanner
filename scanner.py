@@ -4,7 +4,6 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# Pulls your hidden credentials safely from GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -79,7 +78,7 @@ def send_telegram_alert(message_text):
     try:
         response = requests.post(url, json=payload)
         if response.status_code == 200:
-            print("\n✅ Telegram alert sent to your phone!")
+            print("\n✅ Telegram alert sent!")
         else:
             print(f"\n⚠️ Telegram error: {response.text}")
     except Exception as e:
@@ -91,12 +90,12 @@ class NewsomeSp500Agent:
     def __init__(self, tickers):
         self.tickers = tickers
 
-    def fetch_data(self, ticker):
-        """Fetches 2 years of historical daily data to compute both daily and weekly SMAs."""
+    def fetch_data(self, ticker, period="2y"):
+        """Fetches historical daily data for a given ticker."""
         try:
             df = yf.download(
                 ticker,
-                period="2y",
+                period=period,
                 progress=False,
                 group_by="ticker",
                 auto_adjust=True,
@@ -107,13 +106,29 @@ class NewsomeSp500Agent:
         except Exception:
             return None
 
+    def get_market_regime(self):
+        """Checks SPY against its Daily 50 and 200 SMAs for broad market health."""
+        df = self.fetch_data("SPY", period="1y")
+        if df is None or df.empty or len(df) < 200:
+            return "⚪ *Market Status:* Unavailable"
+
+        spy_close = float(df["Close"].iloc[-1])
+        spy_sma50 = float(df["Close"].rolling(window=50).mean().iloc[-1])
+        spy_sma200 = float(df["Close"].rolling(window=200).mean().iloc[-1])
+
+        if spy_close > spy_sma50 and spy_close > spy_sma200:
+            return f"🟢 *Market Status:* BULLISH (SPY `${spy_close:.2f}` > 50 & 200 SMA)"
+        elif spy_close > spy_sma200:
+            return f"🟡 *Market Status:* CAUTION — SPY `${spy_close:.2f}` below 50 SMA (`${spy_sma50:.2f}`)"
+        else:
+            return f"🔴 *Market Status:* HIGH RISK — SPY `${spy_close:.2f}` below 200 SMA (`${spy_sma200:.2f}`)"
+
     def calculate_indicators(self, df):
         """Calculates Daily 100/200 SMAs, 20 EMA, and Weekly 50 SMA."""
         df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
         df["SMA100"] = df["Close"].rolling(window=100).mean()
         df["SMA200"] = df["Close"].rolling(window=200).mean()
 
-        # Resample daily closes to weekly Friday closes to calculate Weekly 50 SMA
         weekly_close = df["Close"].resample("W-FRI").last()
         weekly_sma50 = weekly_close.rolling(window=50).mean()
         df.attrs["WEEKLY_SMA50"] = (
@@ -149,21 +164,12 @@ class NewsomeSp500Agent:
         sma100 = float(today["SMA100"])
         sma200 = float(today["SMA200"])
 
-        # 1. Higher-Timeframe Filter: Price above Weekly 50 SMA
         is_weekly_uptrend = close_today > weekly_sma50
-
-        # 2. Daily Macro Trend Filter: Price above Daily 100 & 200 SMAs
         is_daily_uptrend = close_today > sma100 and close_today > sma200
-
-        # 3. Pullback Filter: Yesterday was a red down-day
         was_pullback = close_yesterday < open_yesterday
-
-        # 4. Trigger Event: Today is a green candle closing above yesterday's high
         is_bull_reversal = (
             close_today > open_today and close_today > high_yesterday
         )
-
-        # 5. Volume Filter: Today's volume beats yesterday's selling volume
         strong_volume = vol_today > vol_yesterday
 
         if (
@@ -189,6 +195,8 @@ class NewsomeSp500Agent:
 
     def scan_market(self):
         """Scans the entire cleaned S&P 500 list for trade setups."""
+        market_status = self.get_market_regime()
+        print(market_status)
         print(f"Beginning scan across {len(self.tickers)} S&P 500 stocks...")
         matches = {}
 
@@ -204,26 +212,19 @@ class NewsomeSp500Agent:
             if (i + 1) % 100 == 0:
                 print(f"Processed {i + 1}/{len(self.tickers)} stocks...")
 
-        return matches
+        return market_status, matches
 
 
 if __name__ == "__main__":
     agent = NewsomeSp500Agent(SP500_TICKERS)
-    results = agent.scan_market()
+    market_status, results = agent.scan_market()
 
     if results:
-        alert_lines = ["📈 *Newsome S&P 500 Swing Setups* 📈\n"]
+        alert_lines = [
+            "📈 *Newsome S&P 500 Swing Setups* 📈",
+            market_status,
+            "",
+        ]
         for stock, details in results.items():
             alert_lines.append(f"*{stock}* — Bullish Reversal (Weekly+Daily)")
             for k, v in details.items():
-                if k != "Signal":
-                    alert_lines.append(f"  • {k}: `${v}`")
-            alert_lines.append("")
-
-        send_telegram_alert("\n".join(alert_lines))
-    else:
-        msg = (
-            "No S&P 500 stocks matched the Weekly 50 SMA + pullback + volume"
-            " criteria today."
-        )
-        send_telegram_alert(f"📊 *Newsome Scanner:* {msg}")
