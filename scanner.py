@@ -91,7 +91,7 @@ class NewsomeSp500Agent:
         self.tickers = tickers
 
     def fetch_data(self, ticker, period="2y"):
-        """Fetches historical daily data for a given ticker."""
+        """Fetches historical daily data and removes any blank placeholder rows."""
         try:
             df = yf.download(
                 ticker,
@@ -102,6 +102,7 @@ class NewsomeSp500Agent:
             )
             if isinstance(df.columns, pd.MultiIndex):
                 df = df[ticker]
+            df = df.dropna(subset=["Close"])
             return df
         except Exception:
             return None
@@ -219,12 +220,23 @@ if __name__ == "__main__":
     agent = NewsomeSp500Agent(SP500_TICKERS)
     market_status, results = agent.scan_market()
 
-    if results:
+   if results:
         alert_lines = [
             "📈 *Newsome S&P 500 Swing Setups* 📈",
             market_status,
             "",
         ]
         for stock, details in results.items():
+            print(f"\n★ Setup Found for {stock} ★")
             alert_lines.append(f"*{stock}* — Bullish Reversal (Weekly+Daily)")
             for k, v in details.items():
+                print(f"  {k}: {v}")
+                if k != "Signal":
+                    alert_lines.append(f"  • {k}: `${v}`")
+            alert_lines.append("")
+
+        send_telegram_alert("\n".join(alert_lines))
+    else:
+        msg = "No S&P 500 stocks matched the Weekly 50 SMA + pullback + volume criteria today."
+        print(f"\n{msg}")
+        send_telegram_alert(f"📊 *Newsome Scanner*\n{market_status}\n\n{msg}")
