@@ -1,10 +1,9 @@
-name: Daily Newsome Swing Scan
+ame: Daily Newsome Swing Scan
 
 on:
   schedule:
     # Runs Monday-Friday at 21:15 UTC (1:15 PM PST / 2:15 PM PDT, safely after US market close)
     - cron: '15 21 * * 1-5'
-  # Allows you to click a button to run it manually anytime
   workflow_dispatch:
 
 jobs:
@@ -12,12 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install dependencies
         run: pip install yfinance pandas requests
