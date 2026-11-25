@@ -92,11 +92,11 @@ class NewsomeSp500Agent:
         self.tickers = tickers
 
     def fetch_data(self, ticker):
-        """Fetches historical daily data for a given ticker."""
+        """Fetches 2 years of historical daily data to compute both daily and weekly SMAs."""
         try:
             df = yf.download(
                 ticker,
-                period="1y",
+                period="2y",
                 progress=False,
                 group_by="ticker",
                 auto_adjust=True,
@@ -108,15 +108,28 @@ class NewsomeSp500Agent:
             return None
 
     def calculate_indicators(self, df):
-        """Calculates 100/200 SMAs and 20 EMA."""
+        """Calculates Daily 100/200 SMAs, 20 EMA, and Weekly 50 SMA."""
         df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
         df["SMA100"] = df["Close"].rolling(window=100).mean()
         df["SMA200"] = df["Close"].rolling(window=200).mean()
+
+        # Resample daily closes to weekly Friday closes to calculate Weekly 50 SMA
+        weekly_close = df["Close"].resample("W-FRI").last()
+        weekly_sma50 = weekly_close.rolling(window=50).mean()
+        df.attrs["WEEKLY_SMA50"] = (
+            float(weekly_sma50.iloc[-1]) if len(weekly_sma50) >= 50 else None
+        )
         return df
 
     def check_bullish_criteria(self, df):
-        """Applies Newsome's Pullback + Reversal Candle + Volume Formula."""
-        if len(df) < 200 or "SMA200" not in df.columns:
+        """Applies Newsome's Weekly + Daily Trend, Pullback, Reversal & Volume Formula."""
+        weekly_sma50 = df.attrs.get("WEEKLY_SMA50")
+        if (
+            len(df) < 200
+            or "SMA200" not in df.columns
+            or weekly_sma50 is None
+            or pd.isna(weekly_sma50)
+        ):
             return None
 
         today = df.iloc[-1]
@@ -136,14 +149,30 @@ class NewsomeSp500Agent:
         sma100 = float(today["SMA100"])
         sma200 = float(today["SMA200"])
 
-        is_uptrend = close_today > sma100 and close_today > sma200
+        # 1. Higher-Timeframe Filter: Price above Weekly 50 SMA
+        is_weekly_uptrend = close_today > weekly_sma50
+
+        # 2. Daily Macro Trend Filter: Price above Daily 100 & 200 SMAs
+        is_daily_uptrend = close_today > sma100 and close_today > sma200
+
+        # 3. Pullback Filter: Yesterday was a red down-day
         was_pullback = close_yesterday < open_yesterday
+
+        # 4. Trigger Event: Today is a green candle closing above yesterday's high
         is_bull_reversal = (
             close_today > open_today and close_today > high_yesterday
         )
+
+        # 5. Volume Filter: Today's volume beats yesterday's selling volume
         strong_volume = vol_today > vol_yesterday
 
-        if is_uptrend and was_pullback and is_bull_reversal and strong_volume:
+        if (
+            is_weekly_uptrend
+            and is_daily_uptrend
+            and was_pullback
+            and is_bull_reversal
+            and strong_volume
+        ):
             entry_price = close_today
             stop_loss = min(low_today, low_yesterday)
             risk = entry_price - stop_loss
@@ -185,7 +214,7 @@ if __name__ == "__main__":
     if results:
         alert_lines = ["📈 *Newsome S&P 500 Swing Setups* 📈\n"]
         for stock, details in results.items():
-            alert_lines.append(f"*{stock}* — Bullish Reversal")
+            alert_lines.append(f"*{stock}* — Bullish Reversal (Weekly+Daily)")
             for k, v in details.items():
                 if k != "Signal":
                     alert_lines.append(f"  • {k}: `${v}`")
@@ -193,5 +222,8 @@ if __name__ == "__main__":
 
         send_telegram_alert("\n".join(alert_lines))
     else:
-        msg = "No S&P 500 stocks matched the pullback + volume criteria today."
+        msg = (
+            "No S&P 500 stocks matched the Weekly 50 SMA + pullback + volume"
+            " criteria today."
+        )
         send_telegram_alert(f"📊 *Newsome Scanner:* {msg}")
